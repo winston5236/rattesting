@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Local USDZ Viewer</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #121212;
+      font-family: sans-serif;
+    }
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+    }
+    #ui-container {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 15px 20px;
+      border-radius: 8px;
+      color: #ffffff;
+      backdrop-filter: blur(5px);
+    }
+    input[type="file"] {
+      display: block;
+      margin-top: 8px;
+      color: #ccc;
+      cursor: pointer;
+    }
+    #status {
+      margin-top: 8px;
+      font-size: 0.9rem;
+      color: #aaa;
+    }
+  </style>
+  
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+
+  <div id="ui-container">
+    <label for="file-input"><strong>Select USDZ File:</strong></label>
+    <input type="file" id="file-input" accept=".usdz">
+    <div id="status">Select a file to display</div>
+  </div>
+
+  <div id="canvas-container"></div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { USDZLoader } from 'three/addons/loaders/USDZLoader.js';
+
+    // 1. Setup Scene, Camera, and Renderer
+    const container = document.getElementById('canvas-container');
+    const fileInput = document.getElementById('file-input');
+    const statusText = document.getElementById('status');
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a1a);
+
+    const camera = new THREE.PerspectiveCamera(
+      60,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      100
+    );
+    camera.position.set(0, 1.5, 3);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    container.appendChild(renderer.domElement);
+
+    // 2. Add Orbit Controls
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    // 3. Add Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 2.5);
+    dirLight.position.set(5, 10, 7.5);
+    scene.add(dirLight);
+
+    // Track active model so we can replace it when uploading a new file
+    let currentModel = null;
+    const loader = new USDZLoader();
+
+    // 4. Handle Local File Upload
+    fileInput.addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      statusText.innerText = 'Loading USDZ file...';
+
+      // Create a temporary Blob URL pointing to the local file
+      const blobUrl = URL.createObjectURL(file);
+
+      loader.load(
+        blobUrl,
+        (usd) => {
+          // Remove previous model if exists
+          if (currentModel) {
+            scene.remove(currentModel);
+          }
+
+          currentModel = usd;
+          scene.add(currentModel);
+          statusText.innerText = `Loaded: ${file.name}`;
+
+          // Auto-center camera on the model bounds
+          const box = new THREE.Box3().setFromObject(currentModel);
+          const center = box.getCenter(new THREE.Vector3());
+          controls.target.copy(center);
+
+          // Clean up memory allocated for Blob URL
+          URL.revokeObjectURL(blobUrl);
+        },
+        (xhr) => {
+          if (xhr.lengthComputable) {
+            const percent = Math.round((xhr.loaded / xhr.total) * 100);
+            statusText.innerText = `Loading: ${percent}%`;
+          }
+        },
+        (error) => {
+          console.error('Error loading USDZ file:', error);
+          statusText.innerText = 'Error parsing USDZ file.';
+          URL.revokeObjectURL(blobUrl);
+        }
+      );
+    });
+
+    // 5. Handle Window Resizing
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // 6. Animation Loop
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
