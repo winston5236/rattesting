@@ -3,14 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Local USDZ Viewer</title>
+  <title>3D Room Scan Viewer</title>
   <style>
-    body {
+    * {
+      box-sizing: border-box;
       margin: 0;
       padding: 0;
+    }
+    body {
       overflow: hidden;
       background-color: #121212;
-      font-family: sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
     #canvas-container {
       width: 100vw;
@@ -21,25 +24,36 @@
       top: 20px;
       left: 20px;
       z-index: 10;
-      background: rgba(0, 0, 0, 0.7);
-      padding: 15px 20px;
-      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.75);
+      padding: 16px 20px;
+      border-radius: 12px;
       color: #ffffff;
-      backdrop-filter: blur(5px);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      max-width: 320px;
+    }
+    label {
+      font-weight: 600;
+      font-size: 0.95rem;
+      display: block;
+      margin-bottom: 8px;
     }
     input[type="file"] {
       display: block;
-      margin-top: 8px;
+      width: 100%;
       color: #ccc;
+      font-size: 0.85rem;
       cursor: pointer;
     }
     #status {
-      margin-top: 8px;
-      font-size: 0.9rem;
+      margin-top: 10px;
+      font-size: 0.85rem;
       color: #aaa;
+      word-break: break-word;
     }
   </style>
   
+  <!-- Import map pinning Three.js and USDZLoader to exact matching versions -->
   <script type="importmap">
     {
       "imports": {
@@ -52,9 +66,9 @@
 <body>
 
   <div id="ui-container">
-    <label for="file-input"><strong>Select USDZ File:</strong></label>
+    <label for="file-input">Upload Room Scan (.usdz)</label>
     <input type="file" id="file-input" accept=".usdz">
-    <div id="status">Select a file to display</div>
+    <div id="status">Select a .usdz file to display</div>
   </div>
 
   <div id="canvas-container"></div>
@@ -64,7 +78,7 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { USDZLoader } from 'three/addons/loaders/USDZLoader.js';
 
-    // 1. Setup Scene, Camera, and Renderer
+    // 1. Scene, Camera, & Renderer Setup
     const container = document.getElementById('canvas-container');
     const fileInput = document.getElementById('file-input');
     const statusText = document.getElementById('status');
@@ -82,15 +96,15 @@
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     container.appendChild(renderer.domElement);
 
-    // 2. Add Orbit Controls
+    // 2. Camera Controls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
 
-    // 3. Add Lighting
+    // 3. Lighting Setup
     const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
     scene.add(ambientLight);
 
@@ -98,24 +112,23 @@
     dirLight.position.set(5, 10, 7.5);
     scene.add(dirLight);
 
-    // Track active model so we can replace it when uploading a new file
     let currentModel = null;
     const loader = new USDZLoader();
 
-    // 4. Handle Local File Upload
+    // 4. File Upload Handler
     fileInput.addEventListener('change', (event) => {
       const file = event.target.files[0];
       if (!file) return;
 
-      statusText.innerText = 'Loading USDZ file...';
+      statusText.innerText = 'Processing file...';
 
-      // Create a temporary Blob URL pointing to the local file
+      // Create local Blob URL
       const blobUrl = URL.createObjectURL(file);
 
       loader.load(
         blobUrl,
         (usd) => {
-          // Remove previous model if exists
+          // Remove previous model if loaded
           if (currentModel) {
             scene.remove(currentModel);
           }
@@ -124,12 +137,19 @@
           scene.add(currentModel);
           statusText.innerText = `Loaded: ${file.name}`;
 
-          // Auto-center camera on the model bounds
+          // Auto-frame camera to model bounding box
           const box = new THREE.Box3().setFromObject(currentModel);
           const center = box.getCenter(new THREE.Vector3());
-          controls.target.copy(center);
+          const size = box.getSize(new THREE.Vector3());
 
-          // Clean up memory allocated for Blob URL
+          const maxDim = Math.max(size.x, size.y, size.z);
+          const fov = camera.fov * (Math.PI / 180);
+          let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5;
+
+          camera.position.set(center.x, center.y + (size.y / 4), center.z + cameraZ);
+          controls.target.copy(center);
+          controls.update();
+
           URL.revokeObjectURL(blobUrl);
         },
         (xhr) => {
@@ -139,21 +159,21 @@
           }
         },
         (error) => {
-          console.error('Error loading USDZ file:', error);
-          statusText.innerText = 'Error parsing USDZ file.';
+          console.error('Error parsing USDZ file:', error);
+          statusText.innerText = 'Error: Parsing failed. The file structure may be unsupported.';
           URL.revokeObjectURL(blobUrl);
         }
       );
     });
 
-    // 5. Handle Window Resizing
+    // 5. Handle Window Resize
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // 6. Animation Loop
+    // 6. Render Loop
     function animate() {
       requestAnimationFrame(animate);
       controls.update();
